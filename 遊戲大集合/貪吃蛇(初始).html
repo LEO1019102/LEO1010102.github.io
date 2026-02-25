@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>傳送門蛇：圓滾滾進階版</title>
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: white; font-family: '微軟正黑體', sans-serif; flex-direction: column; overflow: hidden; }
+        canvas { border: 4px solid #301934; box-shadow: 0 0 30px rgba(72, 52, 212, 0.4); background-color: #0f3460; border-radius: 10px; display: block; }
+        .ui { text-align: center; margin-bottom: 10px; }
+        .score-box { font-size: 24px; color: #e94560; font-weight: bold; }
+        .best-box { font-size: 18px; color: #f1c40f; }
+        
+        /* 開始選單樣式 */
+        #menu { position: absolute; width: 400px; height: 400px; background: rgba(15, 52, 96, 0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; border-radius: 10px; z-index: 10; border: 4px solid #4834d4; }
+        h1 { color: #2ecc71; margin-bottom: 10px; text-shadow: 2px 2px 5px #000; }
+        .rules { font-size: 14px; color: #bdc3c7; margin-bottom: 20px; line-height: 1.6; text-align: left; }
+        button { padding: 12px 30px; font-size: 18px; background: #e94560; color: white; border: none; border-radius: 25px; cursor: pointer; transition: 0.3s; font-weight: bold; }
+        button:hover { background: #ff5e78; transform: scale(1.1); box-shadow: 0 0 15px #e94560; }
+    </style>
+</head>
+<body>
+
+    <div class="ui">
+        <div class="score-box">分數: <span id="scoreVal">0</span></div>
+        <div class="best-box">最高紀錄: <span id="bestVal">0</span></div>
+    </div>
+
+    <div style="position: relative;">
+        <!-- 開始介面 -->
+        <div id="menu">
+            <h1>靈魂傳送蛇</h1>
+            <div class="rules">
+                🍎 紅色蘋果 (+1分)<br>
+                🟦 藍色蘋果 (+2分)<br>
+                👑 金色蘋果 (+3分)<br>
+                🌀 藍色漩渦 = 雙向傳送門<br>
+                🟪 暗紫色石 = 撞到會結束！
+            </div>
+            <button onclick="startGame()">開始遊戲</button>
+        </div>
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreElement = document.getElementById("scoreVal");
+        const bestElement = document.getElementById("bestVal");
+        const menu = document.getElementById("menu");
+
+        const box = 20;
+        let score, highScore, snake, direction, tongueOut, currentFood, gameLoop;
+
+        // 初始化/重置數據
+        function init() {
+            score = 0;
+            highScore = localStorage.getItem("snakeBest") || 0;
+            bestElement.innerHTML = highScore;
+            scoreElement.innerHTML = score;
+            snake = [{x: 9 * box, y: 10 * box}, {x: 8 * box, y: 10 * box}];
+            direction = "RIGHT";
+            tongueOut = false;
+            currentFood = getRandomFood();
+        }
+
+        const portalA = { x: 1 * box, y: 1 * box };
+        const portalB = { x: 18 * box, y: 18 * box };
+        const stones = [
+            {x: 5 * box, y: 5 * box}, {x: 6 * box, y: 5 * box}, {x: 5 * box, y: 6 * box},
+            {x: 14 * box, y: 14 * box}, {x: 13 * box, y: 14 * box}, {x: 14 * box, y: 13 * box}
+        ];
+
+        const foodTypes = [
+            { color: "#ff4d4d", score: 1 },
+            { color: "#3498db", score: 2 },
+            { color: "#f1c40f", score: 3 }
+        ];
+
+        function getRandomFood() {
+            const type = foodTypes[Math.floor(Math.random() * foodTypes.length)];
+            let target;
+            if (Math.random() < 0.5) { // 提高機率出現在石頭旁邊
+                const baseStone = stones[Math.floor(Math.random() * stones.length)];
+                const offsets = [{x:1,y:0}, {x:-1,y:0}, {x:0,y:1}, {x:0,y:-1}];
+                const offset = offsets[Math.floor(Math.random() * offsets.length)];
+                target = { x: baseStone.x + offset.x * box, y: baseStone.y + offset.y * box };
+            } else {
+                target = { x: Math.floor(Math.random() * 18 + 1) * box, y: Math.floor(Math.random() * 18 + 1) * box };
+            }
+            // 修正：絕對不重疊石頭，且不超出邊界
+            if (target.x < 0 || target.x >= canvas.width || target.y < 0 || target.y >= canvas.height || 
+                stones.some(s => s.x === target.x && s.y === target.y)) {
+                return getRandomFood();
+            }
+            return { ...target, ...type };
+        }
+
+        function startGame() {
+            menu.style.display = "none";
+            init();
+            if(gameLoop) clearInterval(gameLoop);
+            gameLoop = setInterval(draw, 200);
+        }
+
+        document.addEventListener("keydown", e => {
+            if(e.keyCode == 37 && direction != "RIGHT") direction = "LEFT";
+            else if(e.keyCode == 38 && direction != "DOWN") direction = "UP";
+            else if(e.keyCode == 39 && direction != "LEFT") direction = "RIGHT";
+            else if(e.keyCode == 40 && direction != "UP") direction = "DOWN";
+        });
+
+        function draw() {
+            ctx.fillStyle = "#0f3460";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            drawPortal(portalA); drawPortal(portalB);
+
+            // 畫暗紫石
+            ctx.fillStyle = "#301934";
+            stones.forEach(s => { ctx.beginPath(); ctx.roundRect(s.x, s.y, box, box, 5); ctx.fill(); });
+
+            // 畫蘋果
+            ctx.fillStyle = currentFood.color;
+            ctx.beginPath(); ctx.arc(currentFood.x + box/2, currentFood.y + box/2, 8, 0, Math.PI * 2); ctx.fill();
+
+            // 畫圓形蛇身體
+            for(let i = 0; i < snake.length; i++) {
+                ctx.fillStyle = (i == 0) ? "#2ecc71" : "#27ae60";
+                ctx.beginPath();
+                ctx.arc(snake[i].x + box/2, snake[i].y + box/2, (i==0? 10 : 8), 0, Math.PI * 2);
+                ctx.fill();
+                if(i === 0) drawFace(snake[i]);
+            }
+
+            let headX = snake[0].x;
+            let headY = snake[0].y;
+            if(direction == "LEFT") headX -= box;
+            else if(direction == "UP") headY -= box;
+            else if(direction == "RIGHT") headX += box;
+            else if(direction == "DOWN") headY += box;
+
+            // 傳送門邏輯
+            if(headX == portalA.x && headY == portalA.y) { headX = portalB.x; headY = portalB.y; }
+            else if(headX == portalB.x && headY == portalB.y) { headX = portalA.x; headY = portalA.y; }
+
+            let newHead = { x: headX, y: headY };
+
+            // 吃到食物
+            if(headX == currentFood.x && headY == currentFood.y) {
+                score += currentFood.score;
+                scoreElement.innerHTML = score;
+                if(score > highScore) {
+                    highScore = score;
+                    localStorage.setItem("snakeBest", highScore);
+                    bestElement.innerHTML = highScore;
+                }
+                currentFood = getRandomFood();
+            } else {
+                snake.pop();
+            }
+
+            // 死亡判定
+            if(headX < 0 || headX >= canvas.width || headY < 0 || headY >= canvas.height || 
+               collision(newHead, snake) || stones.some(s => s.x === headX && s.y === headY)) {
+                clearInterval(gameLoop);
+                setTimeout(() => {
+                    alert("遊戲結束！總分: " + score);
+                    menu.style.display = "flex";
+                }, 10);
+            }
+
+            snake.unshift(newHead);
+            if(Math.random() > 0.8) tongueOut = !tongueOut;
+        }
+
+        function drawPortal(p) {
+            ctx.strokeStyle = "#3498db"; ctx.lineWidth = 2; ctx.beginPath();
+            ctx.arc(p.x + box/2, p.y + box/2, box/2 + Math.sin(Date.now()/100)*3, 0, Math.PI*2);
+            ctx.stroke();
+        }
+
+        function drawFace(head) {
+            const cx = head.x + box/2, cy = head.y + box/2;
+            if(tongueOut) {
+                ctx.strokeStyle = "red"; ctx.lineWidth = 3; ctx.beginPath();
+                let tx = cx, ty = cy;
+                if(direction=="RIGHT") tx+=18; else if(direction=="LEFT") tx-=18;
+                else if(direction=="UP") ty-=18; else if(direction=="DOWN") ty+=18;
+                ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
+            }
+            const angle = Math.atan2(currentFood.y - head.y, currentFood.x - head.x);
+            const ex = Math.cos(angle) * 3, ey = Math.sin(angle) * 3;
+            ctx.fillStyle = "white";
+            ctx.beginPath(); ctx.arc(cx-5, cy-4, 4, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cx+5, cy-4, 4, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "black";
+            ctx.beginPath(); ctx.arc(cx-5+ex, cy-4+ey, 2, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cx+5+ex, cy-4+ey, 2, 0, Math.PI*2); ctx.fill();
+        }
+
+        function collision(head, array) {
+            for(let i = 0; i < array.length; i++) {
+                if(head.x == array[i].x && head.y == array[i].y) return true;
+            }
+            return false;
+        }
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+

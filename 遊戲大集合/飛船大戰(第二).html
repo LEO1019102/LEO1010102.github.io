@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NEON DEFENDER: STARBASE ULTIMATE</title>
+    <style>
+        body { margin: 0; background: #050510; color: white; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+        #container { position: relative; width: 450px; height: 700px; }
+        canvas { background: radial-gradient(circle, #1b2735 0%, #090a0f 100%); border: 3px solid #00f2ff; box-shadow: 0 0 30px #00f2ff44; border-radius: 8px; cursor: none; }
+        .ui { position: absolute; top: 10px; width: 100%; text-align: center; pointer-events: none; z-index: 10; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; border-radius: 8px; text-align: center; }
+        .menu-box { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 15px; border: 1px solid #333; width: 85%; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .diff-btn { background: #111; border: 2px solid #444; padding: 10px; color: white; border-radius: 8px; cursor: pointer; transition: 0.2s; font-size: 13px; font-weight: bold; }
+        .diff-btn:hover { border-color: #00f2ff; background: #1a1a2e; }
+        .bar-container { width: 220px; height: 8px; background: #222; margin: 4px auto; border-radius: 4px; border: 1px solid #444; overflow: hidden; }
+        #player-hp-bar { width: 100%; height: 100%; background: #3498db; transition: 0.2s; }
+        #home-hp-bar { width: 100%; height: 100%; background: #2ecc71; transition: 0.2s; }
+        #ult-bar { width: 0%; height: 100%; background: linear-gradient(90deg, #ff0080, #00f2ff); }
+        .label { font-size: 10px; color: #aaa; margin-top: 2px; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div class="ui">
+            <div style="font-size: 18px; color: #00f2ff; margin-bottom: 2px;">LVL <span id="lvl">1</span> | SCORE <span id="score">0</span> / <span id="target">250</span></div>
+            <div class="label">PLAYER HP</div>
+            <div class="bar-container"><div id="player-hp-bar"></div></div>
+            <div class="label">HOME DEFENSE</div>
+            <div class="bar-container"><div id="home-hp-bar"></div></div>
+            <div class="label">ULTIMATE (SPACE)</div>
+            <div class="bar-container"><div id="ult-bar"></div></div>
+            <div id="boss-ui" style="display:none;">
+                <div class="label" style="color:#f00">BOSS INCOMING</div>
+                <div class="bar-container" style="width:300px;"><div id="boss-hp" style="width:100%; height:100%; background:#f00;"></div></div>
+            </div>
+        </div>
+        
+        <div id="overlay">
+            <div class="menu-box">
+                <h2 style="color:#00f2ff; margin:0 0 5px 0;">NEON DEFENDER</h2>
+                <p style="color:#888; font-size: 13px;">Choose Difficulty & Ship Type</p>
+                <div class="btn-group">
+                    <button class="diff-btn" onclick="setDiff('easy')" id="b-easy">EASY</button>
+                    <button class="diff-btn" onclick="setDiff('normal')" id="b-normal">NORMAL</button>
+                    <button class="diff-btn" onclick="setDiff('hard')" id="b-hard">HARD</button>
+                    <button class="diff-btn" onclick="setDiff('demon')" id="b-demon" style="color:#ff4d4d;">DEMON</button>
+                </div>
+                <hr style="border: 0; border-top: 1px solid #333; margin: 12px 0;">
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button class="diff-btn" style="width: 100px; color:#00f2ff; border-color:#00f2ff" onclick="start('speed')">SPEED</button>
+                    <button class="diff-btn" style="width: 100px; color:#ff0044; border-color:#ff0044" onclick="start('power')">POWER</button>
+                </div>
+            </div>
+        </div>
+        <canvas id="gameCanvas" width="450" height="700"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas"), ctx = canvas.getContext("2d");
+        const scoreEl = document.getElementById("score"), lvlEl = document.getElementById("lvl"), targetEl = document.getElementById("target");
+        const pHPBar = document.getElementById("player-hp-bar"), hHPBar = document.getElementById("home-hp-bar"), uBar = document.getElementById("ult-bar");
+        const overlay = document.getElementById("overlay"), bossFill = document.getElementById("boss-hp");
+
+        let audioCtx, gameRunning = false, score = 0, level = 1, homeHP = 100, targetScore = 250;
+        let player, bullets, enemies, enemyBullets, stars, boss, ultCharge = 0, isUltActive = false;
+        let diffSet = { hp: 150, dmg: 10, crash: 30, spawn: 0.02, eFire: 2200, target: 250 };
+        let ship = {}, lastFire = 0;
+
+        function setDiff(m) {
+            ['easy','normal','hard','demon'].forEach(i => document.getElementById('b-'+i).style.background = "#111");
+            document.getElementById('b-'+m).style.background = "#222";
+            document.getElementById('b-'+m).style.borderColor = "#00f2ff";
+            
+            if(m === 'easy') diffSet = { hp: 200, dmg: 10, crash: 15, spawn: 0.01, eFire: 3500, target: 200 };
+            else if(m === 'normal') diffSet = { hp: 150, dmg: 10, crash: 25, spawn: 0.02, eFire: 2200, target: 250 };
+            else if(m === 'hard') diffSet = { hp: 120, dmg: 20, crash: 50, spawn: 0.03, eFire: 1800, target: 300 };
+            else diffSet = { hp: 120, dmg: 20, crash: 50, spawn: 0.05, eFire: 1200, target: 320 };
+            targetScore = diffSet.target;
+            targetEl.innerText = targetScore;
+        }
+
+        function start(type) {
+            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            overlay.style.display = "none";
+            ship = type === 'speed' ? 
+                { color: "#00f2ff", speed: 0.85, fireRate: 150, ultRate: 0.2, bSize: 4, pow: 1 } : 
+                { color: "#ff0044", speed: 0.45, fireRate: 330, ultRate: 0.5, bSize: 12, pow: 4 };
+
+            player = { x: 225, y: 620, hp: diffSet.hp, maxHp: diffSet.hp };
+            bullets = []; enemies = []; enemyBullets = []; stars = []; boss = null;
+            score = 0; level = 1; homeHP = 100; ultCharge = 0;
+            for(let i=0; i<80; i++) stars.push({x: Math.random()*450, y: Math.random()*700, s: Math.random()*2+0.5, o: Math.random()});
+            
+            gameRunning = true;
+            updateUI();
+            requestAnimationFrame(update);
+        }
+
+        canvas.onmousemove = (e) => {
+            if(!gameRunning) return;
+            const r = canvas.getBoundingClientRect();
+            player.x += (e.clientX - r.left - player.x) * ship.speed;
+        };
+
+        window.onkeydown = (e) => {
+            if(e.code === "Space" && ultCharge >= 100 && gameRunning) {
+                isUltActive = true; ultCharge = 0;
+                setTimeout(() => { isUltActive = false; }, 1500);
+            }
+        };
+
+        function update(time) {
+            if(!gameRunning) return;
+            if(score >= targetScore) { victory(); return; }
+
+            ctx.fillStyle = "#050510"; ctx.fillRect(0, 0, 450, 700);
+            ctx.fillStyle = "#fff";
+            stars.forEach(s => { s.y += s.s; if(s.y > 700) s.y = 0; ctx.globalAlpha = s.o; ctx.fillRect(s.x, s.y, s.s, s.s); ctx.globalAlpha = 1; });
+
+            if(time - lastFire > ship.fireRate && !isUltActive) { bullets.push({x: player.x, y: player.y-15}); lastFire = time; }
+            if(isUltActive) {
+                ctx.fillStyle = "rgba(0, 242, 255, 0.4)"; ctx.fillRect(player.x - 40, 0, 80, player.y);
+                enemies.forEach((e, i) => { if(Math.abs(e.x+15-player.x) < 55) { enemies.splice(i, 1); score++; updateUI(); } });
+                if(boss) boss.hp -= 1.8;
+            }
+
+            bullets.forEach((b, i) => {
+                b.y -= 12; ctx.fillStyle = ship.color; ctx.fillRect(b.x-ship.bSize/2, b.y, ship.bSize, 18);
+                if(boss && b.x > boss.x && b.x < boss.x+boss.w && b.y < boss.y+boss.h) { boss.hp -= ship.pow; bullets.splice(i, 1); return; }
+                enemies.forEach((e, ei) => {
+                    if(b.x > e.x && b.x < e.x+e.w && b.y < e.y+e.h && b.y > e.y) {
+                        e.hp -= ship.pow; bullets.splice(i, 1);
+                        if(e.hp <= 0) { enemies.splice(ei, 1); score++; updateUI(); }
+                    }
+                });
+                if(b.y < 0) bullets.splice(i, 1);
+            });
+
+            if(!boss && Math.random() < diffSet.spawn + (level * 0.005)) {
+                enemies.push({ x: Math.random()*410, y: -30, w: 30, h: 25, s: 1.5 + level*0.25, hp: 1, lastS: 0 });
+            }
+
+            enemies.forEach((e, i) => {
+                e.y += e.s; ctx.fillStyle = "#ff4d4d"; ctx.fillRect(e.x, e.y, e.w, e.h);
+                if(time - e.lastS > diffSet.eFire) { enemyBullets.push({x: e.x+15, y: e.y+25, vy: 4.5}); e.lastS = time; }
+                if(Math.abs(player.x - (e.x+15)) < 25 && Math.abs(player.y - (e.y+12)) < 25) {
+                    player.hp -= diffSet.crash; enemies.splice(i, 1); updateUI(); if(player.hp <= 0) gameOver();
+                }
+                if(e.y > 680) { homeHP -= 10; updateUI(); enemies.splice(i, 1); if(homeHP <= 0) gameOver(); }
+            });
+
+            enemyBullets.forEach((eb, i) => {
+                eb.y += eb.vy; ctx.fillStyle = "#f1c40f"; ctx.beginPath(); ctx.arc(eb.x, eb.y, 4, 0, Math.PI*2); ctx.fill();
+                if(Math.abs(player.x - eb.x) < 18 && Math.abs(player.y - eb.y) < 18) {
+                    player.hp -= diffSet.dmg; enemyBullets.splice(i, 1); updateUI(); if(player.hp <= 0) gameOver();
+                }
+                if(eb.y > 700) enemyBullets.splice(i, 1);
+            });
+
+            if(score > 0 && score % 60 === 0 && !boss) {
+                boss = { x: 75, y: -100, w: 300, h: 80, hp: 300, maxHp: 300, dir: 1, lastS: 0 };
+                document.getElementById("boss-ui").style.display = "block";
+            }
+            if(boss) {
+                boss.y = Math.min(boss.y + 1, 80); boss.x += boss.dir * 2.5;
+                if(boss.x > 140 || boss.x < 10) boss.dir *= -1;
+                ctx.fillStyle = "#f0f"; ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
+                bossFill.style.width = (boss.hp/boss.maxHp*100) + "%";
+                if(time - boss.lastS > 1200) { for(let i=-2; i<=2; i++) enemyBullets.push({x: boss.x+150, y: boss.y+80, vy: 4, vx: i*1.5}); boss.lastS = time; }
+                if(boss.hp <= 0) { score += 2; boss = null; document.getElementById("boss-ui").style.display = "none"; updateUI(); }
+            }
+
+            ultCharge = Math.min(100, ultCharge + ship.ultRate);
+            uBar.style.width = ultCharge + "%";
+            pHPBar.style.width = (player.hp / player.maxHp * 100) + "%";
+            pHPBar.style.background = player.hp < player.maxHp * 0.3 ? "#f44" : "#3498db";
+            hHPBar.style.width = homeHP + "%";
+            hHPBar.style.background = homeHP < 40 ? "#e67" : "#2ec";
+
+            ctx.fillStyle = ship.color; ctx.shadowBlur = 10; ctx.shadowColor = ship.color;
+            ctx.beginPath(); ctx.moveTo(player.x, player.y-20); ctx.lineTo(player.x-20, player.y+20); ctx.lineTo(player.x+20, player.y+20); ctx.fill();
+            ctx.shadowBlur = 0;
+
+            requestAnimationFrame(update);
+        }
+
+        function updateUI() { scoreEl.innerText = score; lvlEl.innerText = Math.floor(score/30)+1; }
+        
+        function victory() {
+            gameRunning = false; overlay.style.display = "flex";
+            overlay.innerHTML = `
+                <div class="menu-box">
+                    <h1 style="color:#f1c40f; font-size:48px; margin:0;">YOU WIN!</h1>
+                    <p style="color:#fff">MISSION ACCOMPLISHED!<br>STARBASE SECURED!</p>
+                    <p style="color:#00f2ff; font-size:18px;">FINAL SCORE: ${score}</p>
+                    <button class="diff-btn" onclick="location.reload()" style="width:180px; margin-top:15px; border-color:#f1c40f">MENU</button>
+                </div>`;
+        }
+
+        function gameOver() {
+            gameRunning = false; overlay.style.display = "flex";
+            overlay.innerHTML = `<h1 style="color:#f44">TERMINATED</h1><p>SCORE: ${score}</p><button class="diff-btn" onclick="location.reload()" style="width:150px; border-color:#f44">RETRY</button>`;
+        }
+        setDiff('normal');
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+

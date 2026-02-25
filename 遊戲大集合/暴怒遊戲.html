@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>反應力測試系統 v4.2 - 核心監控模式</title>
+    <style>
+        body { background: #000; color: #eee; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; overflow: hidden; margin: 0; cursor: default; }
+        
+        /* 起始介面樣式 */
+        #start-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1a1a1a; z-index: 20000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; border: 20px solid #333; box-sizing: border-box; }
+        .warning-box { border: 2px solid #f00; padding: 20px; background: rgba(255,0,0,0.1); max-width: 600px; margin-bottom: 30px; text-align: left; }
+        .warning-title { color: #f00; font-weight: bold; font-size: 24px; margin-bottom: 10px; display: flex; align-items: center; }
+        .start-btn { padding: 15px 60px; font-size: 28px; background: #d00; color: white; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 0 15px #f00; }
+        .start-btn:hover { background: #ff0000; transform: scale(1.05); }
+
+        /* 遊戲介面 */
+        #game-content { display: none; }
+        #cam-feed { position: fixed; bottom: 20px; left: 20px; width: 220px; border: 2px solid #f00; transform: scaleX(-1); opacity: 0.8; filter: grayscale(100%) contrast(150%); }
+        #target { width: 45px; height: 45px; background: radial-gradient(circle, #fff, #f00); position: absolute; border-radius: 50%; box-shadow: 0 0 30px #f00; transition: 0.05s; display: none; z-index: 100; }
+        #cursor-fake { width: 15px; height: 15px; background: #0f0; position: absolute; border-radius: 50%; pointer-events: none; z-index: 1000; display: none; }
+        .rookie-popup { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f00; color: white; z-index: 30000; text-align: center; padding-top: 200px; font-family: "Microsoft JhengHei"; }
+        #status-bar { padding: 15px; background: #111; border-bottom: 2px solid #444; font-family: monospace; display: flex; justify-content: space-around; font-size: 18px; }
+    </style>
+</head>
+<body>
+
+<!-- 起始介面 (加入嚴肅警告) -->
+<div id="start-screen">
+    <div class="warning-box">
+        <div class="warning-title">⚠️ 系統安全性與行為監控警告</div>
+        <p>1. 本測驗受 [全域情緒穩定協議] 監控。偵測到語音辱罵將導致<b>測驗時間即時扣除</b>。</p>
+        <p>2. 啟動後將同步調用 [攝影機] 進行微表情分析，若偵測到焦躁、憤怒，系統將提高難度。</p>
+        <p>3. 嚴禁任何形式的滑鼠宏(Macro)或作弊行為，違者將永久紀錄硬體 ID。</p>
+        <p>4. <b>心理健康提醒：</b>若您曾有因遊戲挫敗導致的情緒失控史，請立即關閉此視窗。</p>
+    </div>
+    <button class="start-btn" onclick="startGame()">我已閱讀並同意以上條款</button>
+</div>
+
+<!-- 遊戲本體 -->
+<div id="game-content">
+    <div id="status-bar">
+        <span>[ 監控等級：SSS ]</span>
+        <span>得分：<span id="score">0</span>/10</span>
+        <span id="timer-ui" style="color:yellow">剩餘時間：20.00s</span>
+    </div>
+
+    <video id="cam-feed" autoplay muted></video>
+    <div id="target"></div>
+    <div id="cursor-fake"></div>
+
+    <div id="rookieBox" class="rookie-popup">
+        <h1 style="font-size: 120px; margin:0;">哈哈！蔡雞！！！</h1>
+        <p style="font-size: 40px;">連這都點不到，你的人生是不是也這麼失敗？</p>
+        <p style="font-size: 20px;">[ 系統診斷：手殘程度 99.9% ]</p>
+        <p>3 秒後自動重試...</p>
+    </div>
+</div>
+
+<script>
+    const target = document.getElementById('target');
+    const scoreEl = document.getElementById('score');
+    const timerUI = document.getElementById('timer-ui');
+    const rookieBox = document.getElementById('rookieBox');
+    const cursor = document.getElementById('cursor-fake');
+    
+    let score = 0;
+    let timeLeft = 20.00;
+    let gameActive = false;
+
+    function startGame() {
+        document.getElementById('start-screen').style.display = 'none';
+        document.getElementById('game-content').style.display = 'block';
+        document.body.style.cursor = 'none';
+        target.style.display = 'block';
+        cursor.style.display = 'block';
+        gameActive = true;
+        
+        initMedia();
+        initVoice();
+        moveTarget();
+    }
+
+    // 1. 鏡頭調用 (利用 MDN API)
+    function initMedia() {
+        navigator.mediaDevices.getUserMedia({ video: true }).then(s => {
+            document.getElementById('cam-feed').srcObject = s;
+        }).catch(() => console.log("Camera Blocked"));
+    }
+
+    // 2. 計時邏輯
+    setInterval(() => {
+        if (!gameActive) return;
+        timeLeft -= 0.01;
+        timerUI.innerText = `剩餘時間：${timeLeft.toFixed(2)}s`;
+        if (timeLeft <= 0) {
+            gameActive = false;
+            rookieBox.style.display = 'block';
+            setTimeout(() => location.reload(), 3000);
+        }
+    }, 10);
+
+    // 3. 語音偵測 (Web Speech API 惡意利用)
+    function initVoice() {
+        const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (Speech) {
+            const rec = new Speech();
+            rec.continuous = true;
+            rec.lang = 'zh-TW';
+            rec.onresult = (e) => {
+                const msg = e.results[e.results.length-1].transcript;
+                // 擴大偵測範圍
+                if (["靠", "乾", "死", "爛", "什麼", "機", "白痴", "媽"].some(w => msg.includes(w))) {
+                    timeLeft -= 5;
+                    // 隨機彈出嘲諷
+                    let notices = ["偵測到憤怒語句：時間 -5s", "請控制您的素質", "偵測到低階辱罵"];
+                    alert(notices[Math.floor(Math.random()*notices.length)]);
+                }
+            };
+            rec.start();
+        }
+    }
+
+    // 4. 惡意操作 (利用 JS 動態座標)
+    document.addEventListener('mousemove', (e) => {
+        if (!gameActive) return;
+        // 游標隨機抖動
+        cursor.style.left = (e.clientX + (Math.random()-0.5)*30) + 'px';
+        cursor.style.top = (e.clientY + (Math.random()-0.5)*30) + 'px';
+
+        const dist = Math.hypot(e.clientX - (target.offsetLeft + 22), e.clientY - (target.offsetTop + 22));
+        if (dist < 150) moveTarget(); // 逃逸半徑加大
+    });
+
+    function moveTarget() {
+        target.style.left = (Math.random() * (window.innerWidth - 100) + 50) + 'px';
+        target.style.top = (Math.random() * (window.innerHeight - 150) + 100) + 'px';
+    }
+
+    target.addEventListener('mousedown', () => {
+        if (!gameActive) return;
+        score++;
+        scoreEl.innerText = score;
+        timeLeft = 20.00; // 假慈悲重置時間
+        
+        if (score >= 10) {
+            alert("⚠️ 錯誤：偵測到非法軟體干預，正在封鎖您的網路連線...");
+            location.reload();
+        }
+        moveTarget();
+    });
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
